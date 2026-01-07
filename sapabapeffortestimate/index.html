@@ -1,1 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>SAP ABAP Project Estimation Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 
+<style>
+:root{
+  --p1:#0d47a1;
+  --p2:#6a1b9a;
+  --bg:#f4f6fb;
+}
+body{margin:0;font-family:Segoe UI,Arial,sans-serif;background:var(--bg);}
+header{
+  background:linear-gradient(135deg,var(--p1),var(--p2));
+  color:#fff;padding:16px 24px;
+}
+header h1{margin:0;font-size:22px;}
+.main{
+  display:grid;
+  grid-template-columns:320px 1fr;
+  gap:16px;padding:16px;
+}
+.panel{
+  background:#fff;border-radius:12px;padding:16px;
+  box-shadow:0 4px 16px rgba(0,0,0,0.1);
+}
+.panel h2{margin-top:0;font-size:16px;color:#283593;}
+label{font-size:13px;font-weight:600;}
+select,input{
+  width:100%;padding:8px;margin:6px 0 12px 0;
+  border-radius:6px;border:1px solid #ccc;
+}
+button{
+  width:100%;padding:12px;
+  background:linear-gradient(135deg,var(--p1),var(--p2));
+  border:none;border-radius:8px;
+  color:#fff;font-size:14px;cursor:pointer;
+}
+button.danger{background:#c62828;}
+button.secondary{background:#2e7d32;margin-top:8px;}
+.dashboard{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  grid-template-rows:auto auto 1fr;
+  gap:16px;
+}
+.cards{
+  grid-column:1/3;
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:12px;
+}
+.card{
+  background:linear-gradient(135deg,#e3f2fd,#ede7f6);
+  border-radius:12px;padding:14px;text-align:center;
+}
+.card h3{margin:0;color:#1a237e;}
+.card span{font-size:12px;color:#555;}
+.result{
+  white-space:pre-line;font-family:"Courier New",monospace;
+  background:#e8f5e9;border:2px solid #43a047;
+  border-radius:10px;padding:14px;
+}
+.list{max-height:260px;overflow:auto;}
+.item{
+  border-bottom:1px solid #eee;padding:10px;
+  display:flex;justify-content:space-between;align-items:center;
+}
+.item:hover{background:#f3e5f5;}
+.item strong{color:#4a148c;}
+.item button{
+  width:auto;padding:4px 8px;font-size:12px;
+  background:#c62828;
+}
+.summary{
+  white-space:pre-line;font-family:"Courier New",monospace;
+  background:#fffde7;border:2px solid #fbc02d;
+  border-radius:10px;padding:14px;
+}
+canvas{
+  width:100%;height:260px;background:#fff;
+  border:1px solid #ddd;border-radius:10px;
+}
+@media(max-width:900px){
+  .main{grid-template-columns:1fr;}
+  .dashboard{grid-template-columns:1fr;}
+  .cards{grid-template-columns:repeat(2,1fr);}
+}
+</style>
+</head>
+
+<body>
+<header>
+<h1>📊 SAP ABAP Project Effort Estimation</h1>
+</header>
+
+<div class="main">
+
+<!-- INPUT -->
+<div class="panel">
+<h2>Project & Object</h2>
+
+<label>Project Name</label>
+<input id="project" value="Demo Project">
+
+<label>Start Date</label>
+<input type="date" id="date">
+
+<label>Resource Skill</label>
+<select id="skill">
+<option value="1">Senior</option>
+<option value="1.2" selected>Mid</option>
+<option value="1.4">Junior</option>
+</select>
+
+<label>ABAP Object</label>
+<select id="object">
+<option value="ABAP_REPORT">ABAP Report</option>
+<option value="INTERFACE">Interface</option>
+<option value="ENHANCEMENT">Enhancement</option>
+<option value="CDS">CDS View</option>
+<option value="ODATA">OData Service</option>
+<option value="FORM">Form</option>
+</select>
+
+<div id="dynamic"></div>
+
+<label>Dependency</label>
+<select id="dep">
+<option value="1">None</option>
+<option value="1.15" selected>Moderate</option>
+<option value="1.3">High</option>
+</select>
+
+<label>Risk</label>
+<select id="risk">
+<option value="0.1">Low</option>
+<option value="0.2" selected>Medium</option>
+<option value="0.3">High</option>
+</select>
+
+<button onclick="estimate()">Add Object Estimation</button>
+<button class="secondary" onclick="downloadCSV()">⬇ Download Excel (CSV)</button>
+<button class="danger" onclick="clearProject()">🗑 Clear Project Data</button>
+</div>
+
+<!-- DASHBOARD -->
+<div class="dashboard">
+
+<div class="cards" id="cards"></div>
+
+<div class="panel">
+<h2>Selected Object Estimation</h2>
+<div id="result" class="result">Select or add an object</div>
+</div>
+
+<div class="panel">
+<h2>Project Objects (Sequence)</h2>
+<div id="list" class="list"></div>
+</div>
+
+<div class="panel" style="grid-column:1/3">
+<h2>Project Summary</h2>
+<div id="summary" class="summary">No project selected</div>
+</div>
+
+<div class="panel" style="grid-column:1/3">
+<h2>Estimated Max Hours (Visual)</h2>
+<canvas id="chart" width="900" height="260"></canvas>
+</div>
+
+</div>
+</div>
+
+<script>
+const STORE="ABAP_PROJECT_EST";
+
+const base={
+ABAP_REPORT:24,INTERFACE:32,ENHANCEMENT:20,CDS:28,ODATA:36,FORM:22
+};
+
+const config={
+ABAP_REPORT:{label:"Report Type",opts:[["Classical",1],["ALV",1.2],["Interactive",1.4]]},
+INTERFACE:{label:"Direction",opts:[["Outbound",1],["Inbound",1.2],["Bi",1.4]]},
+ENHANCEMENT:{label:"Type",opts:[["Implicit",1],["Explicit",1.2],["BAdI",1.4]]},
+CDS:{label:"Joins",opts:[["Simple",1],["Multiple",1.3]]},
+ODATA:{label:"Ops",opts:[["Read",1],["CRUD",1.4]]},
+FORM:{label:"Layout",opts:[["Simple",1],["Complex",1.4]]}
+};
+
+function renderDynamic(){
+dynamic.innerHTML=`
+<label>${config[object.value].label}</label>
+<select id="complex">
+${config[object.value].opts.map(o=>`<option value="${o[1]}">${o[0]}</option>`).join("")}
+</select>`;
+}
+object.onchange=renderDynamic;
+renderDynamic();
+
+function estimate(){
+let effort=base[object.value];
+let c=+complex.value;
+effort*=c;
+effort*=+skill.value*+dep.value;
+
+let min=Math.round(effort);
+let max=Math.round(effort*(1+ +risk.value));
+let conf=+risk.value>=0.3?"Low":+risk.value>=0.2?"Medium":"High";
+
+let text=`Estimated Effort (hours):
+${min} - ${max}
+
+Minimum Effort:
+${min}
+
+Maximum Effort:
+${max}
+
+Confidence Level (Low / Medium / High):
+${conf}
+
+Primary Effort Drivers:
+${c>1?"- "+config[object.value].label:"-"}
+
+Risk Factors:
+- Dependency
+- Integration & regression
+
+Assumptions:
+- Design, development, unit testing, bug fixing included
+- No accelerators
+
+Recommended Buffer (%):
+${risk.value*100}%`;
+
+let data=JSON.parse(localStorage.getItem(STORE)||"{}");
+if(!data[project.value]) data[project.value]=[];
+let seq=data[project.value].length+1;
+
+data[project.value].push({
+seq,object:object.value,date:date.value,
+min,max,conf,text
+});
+localStorage.setItem(STORE,JSON.stringify(data));
+
+result.textContent=text;
+load();
+}
+
+function load(){
+let data=JSON.parse(localStorage.getItem(STORE)||"{}");
+let proj=project.value;
+let listData=data[proj]||[];
+list.innerHTML="";
+let totalMax=0;
+
+listData.forEach((d,i)=>{
+totalMax+=d.max;
+list.innerHTML+=`
+<div class="item">
+<div onclick="show('${proj}',${i})">
+<strong>#${d.seq}</strong> ${d.object}<br>Max: ${d.max}h
+</div>
+<button onclick="removeItem('${proj}',${i})">✖</button>
+</div>`;
+});
+
+cards.innerHTML=`
+<div class="card"><h3>${listData.length}</h3><span>Objects</span></div>
+<div class="card"><h3>${totalMax}</h3><span>Total Max Hours</span></div>
+<div class="card"><h3>${Math.round(totalMax/listData.length||0)}</h3><span>Avg / Object</span></div>
+<div class="card"><h3>${proj}</h3><span>Project</span></div>
+`;
+
+summary.textContent=
+`Project: ${proj}
+Total Objects: ${listData.length}
+Estimated Start Date: ${listData[0]?.date||"-"}
+Total Estimated Effort (Max): ${totalMax} hours`;
+
+draw(listData);
+}
+
+function show(p,i){
+let d=JSON.parse(localStorage.getItem(STORE))[p][i];
+result.textContent=d.text;
+}
+
+function removeItem(p,i){
+if(!confirm("Remove this object estimation?")) return;
+let data=JSON.parse(localStorage.getItem(STORE));
+data[p].splice(i,1);
+data[p].forEach((o,idx)=>o.seq=idx+1);
+localStorage.setItem(STORE,JSON.stringify(data));
+load();
+}
+
+function clearProject(){
+if(!confirm("Delete all estimations for this project?")) return;
+let data=JSON.parse(localStorage.getItem(STORE)||"{}");
+delete data[project.value];
+localStorage.setItem(STORE,JSON.stringify(data));
+result.textContent="Project cleared";
+load();
+}
+
+function draw(data){
+const c=document.getElementById("chart");
+const x=c.getContext("2d");
+x.clearRect(0,0,c.width,c.height);
+if(!data.length)return;
+
+let pad=50,bw=40,gap=25;
+let max=Math.max(...data.map(d=>d.max));
+let scale=(c.height-pad*2)/max;
+
+data.forEach((d,i)=>{
+let h=d.max*scale;
+let X=pad+i*(bw+gap);
+let Y=c.height-pad-h;
+x.fillStyle="#6a1b9a";
+x.fillRect(X,Y,bw,h);
+x.fillStyle="#000";
+x.fillText("Obj "+d.seq,X,Y-6);
+x.fillText(d.max+"h",X,Y+h+14>c.height-pad?Y-18:Y-6);
+});
+}
+
+function downloadCSV(){
+let data=JSON.parse(localStorage.getItem(STORE)||"{}");
+let proj=project.value;
+let list=data[proj];
+if(!list||!list.length){alert("No data to export");return;}
+
+let rows=[
+["Sequence","Project","Object Type","Start Date","Min Hours","Max Hours","Confidence"]
+];
+
+list.forEach(o=>{
+rows.push([
+o.seq,
+proj,
+o.object,
+o.date||"",
+o.min,
+o.max,
+o.conf
+]);
+});
+
+let csv=rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
+
+let blob=new Blob([csv],{type:"text/csv;charset=utf-8;"});
+let a=document.createElement("a");
+a.href=URL.createObjectURL(blob);
+a.download=proj+"_ABAP_Estimation.csv";
+a.click();
+}
+
+load();
+</script>
+</body>
+</html>
